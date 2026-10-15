@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Simulador de resalto hidráulico</title>
+<style>
+:root{--bg:#f6f8fa;--card:#fff;--tx:#14202b;--mut:#5b6b7a;--bd:#d6dde4;--ac:#0b6bcb;--water:#4aa3df;--water2:#2b78b8;--sky:#eef4f9;--concrete:#8a8f94;--ok:#1a7f4b;--warn:#b26a00;--bad:#c0392b;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#10171e;--card:#18222c;--tx:#e6edf3;--mut:#93a3b3;--bd:#2b3946;--ac:#5aaaf5;--water:#2f86c4;--water2:#1d5d92;--sky:#14202b;--concrete:#6b7075;--ok:#4cc38a;--warn:#e0a040;--bad:#ef6c5d}}
+:root[data-theme="dark"]{--bg:#10171e;--card:#18222c;--tx:#e6edf3;--mut:#93a3b3;--bd:#2b3946;--ac:#5aaaf5;--water:#2f86c4;--water2:#1d5d92;--sky:#14202b;--concrete:#6b7075;--ok:#4cc38a;--warn:#e0a040;--bad:#ef6c5d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:16px}
+h1{font-size:1.35rem;margin:0 0 2px}
+.sub{color:var(--mut);margin:0 0 12px;font-size:.9rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px}
+canvas{width:100%;height:auto;display:block;border-radius:8px;background:var(--sky)}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 0}
+.badge{padding:4px 10px;border-radius:20px;border:1px solid var(--bd);font-size:.85rem;font-weight:600}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 14px;margin-top:12px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 6px);z-index:20;padding:8px 12px;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+@media (max-width:640px){.ctl small{display:none}.grid{grid-template-columns:1fr 1fr;gap:2px 12px;padding:6px 10px}.ctl label{font-size:.78rem;flex-direction:column}.ctl input{margin:2px 0 0}}
+.ctl label{display:flex;justify-content:space-between;font-weight:600;font-size:.9rem}
+.ctl output{color:var(--ac);font-variant-numeric:tabular-nums}
+.ctl input{width:100%;accent-color:var(--ac);margin:6px 0 0}
+.ctl small{color:var(--mut);display:block}
+.res{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:12px}
+.m{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:8px 10px}
+.m span{display:block;color:var(--mut);font-size:.78rem}
+.m b{font-size:1.15rem;font-variant-numeric:tabular-nums}
+.m i{font-style:normal;color:var(--mut);font-size:.8rem;margin-left:3px}
+h2{font-size:1rem;margin:16px 0 0}
+.note{color:var(--mut);font-size:.8rem;margin-top:12px}
+</style>
+</head>
+<body>
+<main>
+<h1>Resalto hidráulico en canal rectangular</h1>
+<p class="sub">Flujo bajo compuerta de fondo → régimen supercrítico → resalto → flujo subcrítico</p>
+<div class="card">
+<canvas id="cv" width="960" height="420"></canvas>
+<div class="badges"><span class="badge" id="bType"></span><span class="badge" id="bState"></span></div>
+</div>
+
+<div class="grid card">
+<div class="ctl"><label>Profundidad del reservorio y₀ <output id="o0"></output></label><input type="range" id="y0" min="0.5" max="8" step="0.05" value="3"><small>Carga aguas arriba de la compuerta</small></div>
+<div class="ctl"><label>Apertura de compuerta a <output id="oa"></output></label><input type="range" id="a" min="0.02" max="2.4" step="0.01" value="0.4"><small id="amax"></small></div>
+<div class="ctl"><label>Ancho del canal b <output id="ob"></output></label><input type="range" id="b" min="0.5" max="12" step="0.1" value="4"></div>
+<div class="ctl"><label>Nivel aguas abajo y<sub>t</sub>/y₂ <output id="or"></output></label><input type="range" id="r" min="0.5" max="1.4" step="0.01" value="1"><small>Controla dónde se ubica el resalto</small></div>
+</div>
+
+<h2>Flujo supercrítico (sección contraída)</h2>
+<div class="res" id="r1"></div>
+<h2>Flujo subcrítico (después del resalto)</h2>
+<div class="res" id="r2"></div>
+<h2>Descarga y energía</h2>
+<div class="res" id="r3"></div>
+
+<p class="note">Modelo: compuerta de fondo en descarga libre, Cc = 0,61, canal rectangular horizontal sin fricción, g = 9,81 m/s². q = Cc·a·√(2g·y₀/(1+Cc·a/y₀)); y₂ = (y₁/2)(√(1+8Fr₁²) − 1); ΔE = (y₂−y₁)³/(4y₁y₂); L ≈ 6y₂. El esquema no está a escala horizontal.</p>
+</main>
+<script>
+const g=9.81,Cc=0.61;
+const $=id=>document.getElementById(id);
+let S={};
+function calc(){
+  const y0=+$('y0').value;
+  const amax=Math.min(2.4,0.8*y0);
+  $('a').max=amax.toFixed(2);
+  let a=Math.min(+$('a').value,amax);
+  if(+$('a').value>amax)$('a').value=a;
+  $('amax').textContent='Máximo permitido: '+amax.toFixed(2)+' m (0,8·y₀)';
+  const b=+$('b').value,r=+$('r').value;
+  const y1=Cc*a,q=Cc*a*Math.sqrt(2*g*y0/(1+Cc*a/y0)),Q=q*b,v0=q/y0,v1=q/y1;
+  const Fr1=v1/Math.sqrt(g*y1);
+  const y2=Fr1>1?y1/2*(Math.sqrt(1+8*Fr1*Fr1)-1):NaN;
+  const v2=q/y2,Fr2=v2/Math.sqrt(g*y2);
+  const E1=y1+v1*v1/(2*g),E2=y2+v2*v2/(2*g),dE=E1-E2;
+  const yc=Math.cbrt(q*q/g),L=6*y2,P=1000*g*Q*dE/1000;
+  S={y0,a,b,r,y1,q,Q,v0,v1,Fr1,y2,v2,Fr2,E1,E2,dE,yc,L,P,yt:r*y2};
+  const f=(x,n=2)=>isFinite(x)?x.toFixed(n).replace('.',','):'–';
+  $('o0').textContent=f(y0)+' m';$('oa').textContent=f(a)+' m';$('ob').textContent=f(b,1)+' m';
+  $('or').textContent=f(r)+'  ('+f(S.yt)+' m)';
+  const M=(l,v,u)=>`<div class="m"><span>${l}</span><b>${v}</b><i>${u}</i></div>`;
+  $('r1').innerHTML=M('Profundidad y₁',f(y1,3),'m')+M('Velocidad v₁',f(v1),'m/s')+M('Froude Fr₁',f(Fr1),'')+M('Prof. crítica y<sub>c</sub>',f(yc,3),'m');
+  $('r2').innerHTML=M('Prof. conjugada y₂',f(y2,3),'m')+M('Velocidad v₂',f(v2),'m/s')+M('Froude Fr₂',f(Fr2),'')+M('Razón y₂/y₁',f(y2/y1),'')+M('Longitud del resalto L',f(L),'m');
+  $('r3').innerHTML=M('Caudal Q',f(Q),'m³/s')+M('Caudal unitario q',f(q,3),'m²/s')+M('Velocidad en reservorio v₀',f(v0,3),'m/s')+M('Energía E₁',f(E1),'m')+M('Energía E₂',f(E2),'m')+M('Pérdida ΔE',f(dE),'m')+M('Disipación ΔE/E₁',f(100*dE/E1,1),'%')+M('Potencia disipada',f(P,1),'kW');
+  let t,c;
+  if(!(Fr1>1)){t='Sin resalto (Fr₁ ≤ 1)';c='bad'}
+  else if(Fr1<1.7){t='Resalto ondulatorio (Fr₁ < 1,7)';c='warn'}
+  else if(Fr1<2.5){t='Resalto débil (1,7–2,5)';c='warn'}
+  else if(Fr1<4.5){t='Resalto oscilante (2,5–4,5)';c='warn'}
+  else if(Fr1<9){t='Resalto estable (4,5–9): buena disipación';c='ok'}
+  else{t='Resalto fuerte (Fr₁ > 9)';c='bad'}
+  $('bType').textContent=t;$('bType').style.color='var(--'+c+')';
+  let s,c2;
+  if(r<0.97){s='Resalto barrido aguas abajo (nivel de cola insuficiente)';c2='bad'}
+  else if(r<=1.03){s='Resalto en el pie de la compuerta (posición ideal)';c2='ok'}
+  else{s='Resalto ahogado / sumergido (nivel de cola alto)';c2='warn'}
+  $('bState').textContent=s;$('bState').style.color='var(--'+c2+')';
+}
+['y0','a','b','r'].forEach(i=>$(i).addEventListener('input',calc));
+calc();
+
+const cv=$('cv'),ctx=cv.getContext('2d');
+const W=960,H=420,floor=H-34,xg=210;
+function fit(){const d=window.devicePixelRatio||1;cv.width=W*d;cv.height=H*d;ctx.setTransform(d,0,0,d,0,0)}
+fit();
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const P=[];for(let i=0;i<90;i++)P.push({x:Math.random()*W,f:0.06+Math.random()*0.88});
+let t0=performance.now();
+function geom(){
+  const {y0,y1,y2,yt,r,Fr1}=S;
+  const ymax=Math.max(y0,yt||0,y2||0)*1.12,sy=(floor-30)/ymax;
+  const Lpx=Math.max(70,Math.min(240,6*(y2||1)*sy*0.7));
+  const free=W-xg-30-Lpx;
+  let xj=xg+8,sub=false;
+  if(r<0.97)xj=xg+8+Math.min(1,(0.97-r)/0.3)*(free-8);
+  else if(r>1.03)sub=true;
+  return {sy,Lpx,xj,sub};
+}
+function surf(x,G){
+  const {y0,y1,yt}=S;
+  if(x<xg)return y0;
+  if(G.sub)return yt;
+  if(x<G.xj)return y1;
+  if(x<G.xj+G.Lpx){const u=(x-G.xj)/G.Lpx;return y1+(yt-y1)*(u*u*(3-2*u))}
+  return yt;
+}
+function frame(now){
+  const dt=Math.min(0.05,(now-t0)/1000);t0=now;
+  const G=geom(),{sy}=G;
+  ctx.clearRect(0,0,W,H);
+  const Y=h=>floor-h*sy;
+  // agua
+  const gr=ctx.createLinearGradient(0,0,0,H);gr.addColorStop(0,css('--water'));gr.addColorStop(1,css('--water2'));
+  ctx.fillStyle=gr;ctx.beginPath();ctx.moveTo(0,floor);
+  for(let x=0;x<=W;x+=3){
+    let h=surf(x,G);
+    if(x>=G.xj&&x<=G.xj+G.Lpx+30&&!G.sub&&S.Fr1>1)h+=Math.sin(now/90+x*0.35)*0.03*Math.min(S.Fr1,8)*S.y2/ (S.y2||1);
+    ctx.lineTo(x,Y(h));}
+  ctx.lineTo(W,floor);ctx.closePath();ctx.fill();
+  // partículas
+  ctx.fillStyle='rgba(255,255,255,.65)';
+  for(const p of P){
+    const h=surf(p.x,G);
+    let v=p.x<xg?S.v0:(G.sub||p.x<G.xj?S.v1:(p.x<G.xj+G.Lpx?(S.v1+S.v2)/2:S.v2));
+    if(G.sub&&p.x>xg+G.Lpx*0.8)v=S.v2;
+    p.x+=Math.min(v*38,420)*dt;
+    if(p.x>W){p.x=0;p.f=0.06+Math.random()*0.88}
+    ctx.beginPath();ctx.arc(p.x,Y(h*p.f),2,0,6.283);ctx.fill();
+  }
+  // rodillo + espuma
+  if(S.Fr1>1){
+    const cx=G.sub?xg+G.Lpx*0.5:G.xj+G.Lpx*0.45,hh=surf(cx,G);
+    const rad=Math.max(10,Math.min(0.45*hh*sy,60));
+    ctx.fillStyle='rgba(255,255,255,.85)';
+    const n=Math.min(36,Math.round(8+S.Fr1*3));
+    for(let i=0;i<n;i++){
+      const a=now/260*(1+0.1*(i%5))+i*6.283/n;
+      const px=cx+Math.cos(a)*rad*1.3,py=Y(hh)+rad*0.35-Math.sin(a)*rad*0.55;
+      ctx.beginPath();ctx.arc(px,py,1.5+(i%3),0,6.283);ctx.fill();
+    }
+    ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=2;ctx.beginPath();
+    ctx.ellipse(cx,Y(hh)+rad*0.4,rad*1.4,rad*0.6,0,0.3,5.9);ctx.stroke();
+  }
+  // piso y compuerta
+  ctx.fillStyle=css('--concrete');ctx.fillRect(0,floor,W,H-floor);
+  const gy=Y(S.a);
+  ctx.fillRect(xg-5,0,10,gy);
+  ctx.fillStyle=css('--tx');
+  ctx.font='13px system-ui,sans-serif';
+  const lab=(txt,x,y,al)=>{ctx.textAlign=al||'left';ctx.fillText(txt,x,y)};
+  const f2=v=>v.toFixed(2).replace('.',',');
+  ctx.strokeStyle=css('--tx');ctx.lineWidth=1;
+  // cotas
+  const dim=(x,h0,h1,txt,al)=>{ctx.beginPath();ctx.moveTo(x,Y(h0));ctx.lineTo(x,Y(h1));ctx.stroke();lab(txt,x+(al==='r'?-6:6),Y((h0+h1)/2)+4,al==='r'?'right':'left')};
+  dim(xg-40,0,S.y0,'y₀ = '+f2(S.y0)+' m','r');
+  dim(xg+14,0,S.a,'',''); 
+  lab('a = '+f2(S.a)+' m',xg+18,Math.min(floor-6,Y(S.a/2))+4);
+  if(isFinite(S.y2)){
+    const xa=G.sub?xg+G.Lpx+30:Math.min(W-90,G.xj-20);
+    if(!G.sub&&G.xj>xg+60)dim(xg+(G.xj-xg)/2,0,S.y1,'y₁ = '+f2(S.y1)+' m','');
+    else lab('y₁ = '+f2(S.y1)+' m',xg+24,Y(S.y1)-8);
+    dim(W-40,0,S.yt,'y = '+f2(S.yt)+' m','r');
+    lab('v₁ = '+f2(S.v1)+' m/s · Fr₁ = '+f2(S.Fr1),xg+24,24);
+    lab('v₂ = '+f2(S.v2)+' m/s · Fr₂ = '+f2(S.Fr2),W-24,24,'right');
+  }
+  lab('Reservorio',20,24);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
